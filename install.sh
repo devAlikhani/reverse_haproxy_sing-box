@@ -29,7 +29,7 @@ configure_caddy() {
 $caddy_domain {
     handle /sub/* {
         root * /var/www/textfiles/
-        file_server
+        file_serverx
         uri strip_prefix /sub
     }
 
@@ -93,18 +93,21 @@ add_service_to_haproxy() {
     read -p "Enter the port for the new service (e.g., 5002): " service_port
     read -p "Enter the SNI domain to route to the new service (e.g., service.example.com): " service_sni
 
+    # Create a unique backend name using the SNI domain
+    backend_name=$(echo "$service_sni" | tr '.' '_' | tr '-' '_')
+
     # Add new service configuration to HAProxy
-    echo "Adding new service to HAProxy..."
+    echo "Adding new service ($backend_name) to HAProxy..."
     echo "
-backend new_service_backend
+backend $backend_name
     mode tcp
-    server new_service 127.0.0.1:$service_port check" | tee -a /etc/haproxy/haproxy.cfg
+    server ${backend_name}_server 127.0.0.1:$service_port check" | sudo tee -a /etc/haproxy/haproxy.cfg
 
     # Modify the frontend to add a rule for the new service
-    sed -i "/frontend https_in/a \    use_backend new_service_backend if { req_ssl_sni -i $service_sni }" /etc/haproxy/haproxy.cfg
+    sudo sed -i "/frontend https_in/a \    use_backend $backend_name if { req_ssl_sni -i $service_sni }" /etc/haproxy/haproxy.cfg
 
     # Restart HAProxy to apply changes
-    systemctl restart haproxy
+    sudo systemctl restart haproxy
 
     echo "New service added to HAProxy."
 }
