@@ -121,21 +121,8 @@ backend $backend_name
     echo "New service added to HAProxy."
 }
 
-configure_haproxy_ip_access() {
-    read -p "Enter the port for direct HTTPS IP access (e.g., 8081): " https_ip_access_port
+configure_haproxy_http_ip_access() {
     read -p "Enter the port for direct HTTP IP access (e.g., 8080): " http_ip_access_port
-
-    # Add new frontend/backend configuration to HAProxy for HTTPS
-    echo "Adding direct HTTPS IP access to HAProxy..."
-    echo "
-frontend ip_https_based_frontend
-    bind $SERVER_IP:$https_ip_access_port
-    mode tcp
-    default_backend caddy_https_backend
-
-backend caddy_https_backend
-    mode tcp
-    server caddy 127.0.0.1:5003" | sudo tee -a /etc/haproxy/haproxy.cfg
 
     # Add new frontend/backend configuration to HAProxy for HTTP
     echo "Adding direct HTTP IP access to HAProxy..."
@@ -147,12 +134,12 @@ frontend ip_http_based_frontend
 
 backend caddy_http_backend
     mode http
-    server caddy 127.0.0.1:8080" | sudo tee -a /etc/haproxy/haproxy.cfg
+    server caddy 127.0.0.1:8083" | sudo tee -a /etc/haproxy/haproxy.cfg
 
     # Restart HAProxy to apply changes
     sudo systemctl restart haproxy
 
-    echo "Direct IP access configured in HAProxy."
+    echo "Direct HTTP IP access configured in HAProxy."
 }
 
 # Main script starts here
