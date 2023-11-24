@@ -1,6 +1,10 @@
 #!/bin/bash
 
 # Function to install Caddy
+
+SERVER_IP=$(curl -s ip.sb)
+
+
 install_caddy() {
     echo "Installing Caddy..."
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
@@ -113,22 +117,19 @@ backend $backend_name
 }
 
 configure_haproxy_ip_access() {
-    read -p "Enter the port for direct IP access (e.g., 8081): " direct_ip_port
+    read -p "Enter the port for direct IP access (e.g., 8081): " ip_access_port
 
-    SERVER_IP=$(curl -s ip.sb)
-
-    echo "Configuring HAProxy for direct IP access..."
-    cat <<EOF | sudo tee -a /etc/haproxy/haproxy.cfg
-
+    # Add new frontend/backend configuration to HAProxy
+    echo "Adding direct IP access to HAProxy..."
+    echo "
 frontend ip_based_frontend
-    bind $SERVER_IP:$direct_ip_port
+    bind $SERVER_IP:$ip_access_port
     mode http
     default_backend ssh_backend
 
 backend ssh_backend
     mode http
-    server caddy 127.0.0.1:5003
-EOF
+    server caddy 127.0.0.1:5003" | sudo tee -a /etc/haproxy/haproxy.cfg
 
     # Restart HAProxy to apply changes
     sudo systemctl restart haproxy
@@ -139,7 +140,8 @@ EOF
 # Main script starts here
 echo "1. Install and configure Caddy and HAProxy from scratch."
 echo "2. Add a new service to an existing HAProxy setup."
-read -p "Choose an option (1 or 2): " choice
+echo "3. Configure HAProxy for direct IP access."
+read -p "Choose an option (1, 2, or 3): " choice
 
 if [ "$choice" == "1" ]; then
     read -p "Enter the domain to be served by Caddy: " caddy_domain
@@ -158,9 +160,12 @@ elif [ "$choice" == "2" ]; then
         echo "HAProxy is not installed. Installing now."
         install_haproxy
     fi
-    add_service_to_haproxy
+    elif [ "$choice" == "3" ]; then
+    if ! command -v haproxy &> /dev/null; then
+        echo "HAProxy is not installed. Installing now."
+        install_haproxy
+    fi
     configure_haproxy_ip_access
-
 else
     echo "Invalid choice. Exiting."
     exit 1
