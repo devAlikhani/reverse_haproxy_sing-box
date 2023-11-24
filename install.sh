@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# Function to get the server IP address
-get_server_ip() {
-    SERVER_IP=$(curl -s ip.sb)
-}
-
 # Function to install Caddy
 install_caddy() {
     echo "Installing Caddy..."
@@ -29,11 +24,6 @@ configure_caddy() {
 {
     http_port 8083
     https_port $caddy_port
-}
-
-# Redirect HTTP to HTTPS
-http:// {
-    redir https://{host}{uri}
 }
 
 $caddy_domain {
@@ -81,15 +71,10 @@ frontend https_in
     tcp-request inspect-delay 5s
     tcp-request content accept if { req_ssl_hello_type 1 }
     use_backend caddy_backend if { req_ssl_sni -i $caddy_domain }
-    use_backend default_service_backend if { req_ssl_sni -i $default_sni_domain }
 
 backend caddy_backend
     mode tcp
     server caddy_server 127.0.0.1:$caddy_port check
-
-backend default_service_backend
-    mode tcp
-    server default_service 127.0.0.1:$default_service_port check
 EOF
     systemctl restart haproxy
 }
@@ -108,34 +93,15 @@ backend $backend_name
     sudo systemctl restart haproxy
 }
 
-# Function to configure HAProxy for direct HTTP IP access
-configure_haproxy_http_ip_access() {
-    read -p "Enter the port for direct HTTP IP access (e.g., 8080): " http_ip_access_port
-    echo "Adding direct HTTP IP access to HAProxy..."
-    echo "
-frontend ip_http_based_frontend
-    bind $SERVER_IP:$http_ip_access_port
-    mode http
-    default_backend caddy_http_backend
-
-backend caddy_http_backend
-    mode http
-    server caddy 127.0.0.1:8083" | sudo tee -a /etc/haproxy/haproxy.cfg
-    sudo systemctl restart haproxy
-}
-
 # Main script logic
 echo "1. Install and configure Caddy and HAProxy from scratch."
 echo "2. Add a new service to an existing HAProxy setup."
-echo "3. Configure HAProxy for direct IP access."
-read -p "Choose an option (1, 2, or 3): " choice
+read -p "Choose an option (1 or 2): " choice
 
 case $choice in
     1)
         read -p "Enter the domain to be served by Caddy: " caddy_domain
         read -p "Enter the port for Caddy to listen on (e.g., 5003): " caddy_port
-        read -p "Enter the SNI domain for the default service (e.g., default.example.com): " default_sni_domain
-        read -p "Enter the port for the default service (e.g., 5004): " default_service_port
         if ! command -v caddy &> /dev/null || ! command -v haproxy &> /dev/null; then
             install_caddy
             install_haproxy
@@ -149,14 +115,6 @@ case $choice in
             install_haproxy
         fi
         add_service_to_haproxy
-        ;;
-    3)
-        get_server_ip
-        if ! command -v haproxy &> /dev/null; then
-            echo "HAProxy is not installed. Installing now."
-            install_haproxy
-        fi
-        configure_haproxy_http_ip_access
         ;;
     *)
         echo "Invalid choice. Exiting."
