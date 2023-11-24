@@ -1,90 +1,107 @@
 #!/bin/bash
 
-# Check if running as root
-if [ "$(id -u)" != "0" ]; then
-   echo "This script must be run as root" 1>&2
-   exit 1
+# Ask for the domain name
+read -p "Enter the domain to be served by Caddy: " domain
+
+# Function to install Caddy
+install_caddy() {
+    echo "Installing Caddy..."
+    apt install -y debian-keyring debian-archive-keyring apt-transport-https
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+    apt update
+    apt install caddy
+}
+
+# Function to install HAProxy
+install_haproxy() {
+    echo "Installing HAProxy..."
+    sudo apt update
+    sudo apt install haproxy
+}
+
+# Check if Caddy is installed and running
+if ! command -v caddy &> /dev/null; then
+    install_caddy
 fi
 
-# Prompt for the domain
-read -p "Enter the domain name: " domain
+# Check if HAProxy is installed and running
+if ! command -v haproxy &> /dev/null; then
+    install_haproxy
+fi
 
-# Update and install Certbot and HAProxy
-echo "Updating system and installing Certbot and HAProxy..."
-apt-get update
-apt-get install -y certbot haproxy
+# Configure Caddy
+echo "Configuring Caddy for $domain..."
+cat <<EOF | sudo tee /etc/caddy/Caddyfile
 
-# Obtain the certificate
-echo "Obtaining SSL certificate for $domain..."
-certbot certonly --standalone -d "$domain" --non-interactive --agree-tos -m your-email@example.com
+{
+    http_port 8080
+    https_port 5003
+}
 
-# Combine certificates for HAProxy
-echo "Combining certificates for HAProxy..."
-cat /etc/letsencrypt/live/"$domain"/fullchain.pem /etc/letsencrypt/live/"$domain"/privkey.pem > /etc/haproxy/certs/"$domain".pem
+
+$domain {
+    
+handle /sub/* {
+    root * /var/www/textfiles/
+    file_server
+    uri strip_prefix /sub
+}
+
+handle /ssh/* {
+    root * /var/ssh-users/
+    file_server
+    uri strip_prefix /ssh
+}
+
+  # You may want to add additional configurations here, 
+  # like logging, error handling, etc.    
+
+}
+EOF
+
+# Restart Caddy to apply changes
+sudo systemctl restart caddy
 
 # Configure HAProxy
 echo "Configuring HAProxy..."
-haproxy_cfg="/etc/haproxy/haproxy.cfg"
-
-# Backup original HAProxy configuration
-cp $haproxy_cfg $haproxy_cfg.bak
-
-# Add configuration
-echo "
+cat <<EOF | sudo tee /etc/haproxy/haproxy.cfg
 global
     log /dev/log local0
     log /dev/log local1 notice
     chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
     user haproxy
     group haproxy
     daemon
 
 defaults
-    log     global
-    mode    http
-    option  httplog
-    option  dontlognull
+    log global
+    mode tcp
+    option tcplog
     timeout connect 5000ms
-    timeout client  50000ms
-    timeout server  50000ms
+    timeout client 50000ms
+    timeout server 50000ms
 
-frontend https_front
-    bind *:443 ssl crt /etc/haproxy/certs/$domain.pem
+frontend https_in
+    bind *:443
     mode tcp
     tcp-request inspect-delay 5s
     tcp-request content accept if { req_ssl_hello_type 1 }
+    use_backend caddy_backend if { req_ssl_sni -i $domain }
+    use_backend sing-box if { req_ssl_sni -i www.speedtest.net }
 
-    acl is_sing_box req_ssl_sni -i $domain
-    acl is_website req_ssl_sni -i $domain/sub/
-    acl is_ssh req_ssl_sni -i $domain/ssh/
-
-    use_backend sing_box_service if is_sing_box
-    use_backend website_service if is_website
-    use_backend ssh_service if is_ssh
-
-backend sing_box_service
+backend caddy_backend
     mode tcp
-    server singbox localhost:5001 check
+    server caddy_server 127.0.0.1:5003 check
 
-backend website_service
-    mode http
-    server website localhost:<WEBSITE_PORT> check
+backend sing-box
+    mode tcp
+    server localhost 127.0.0.1:5002 check
+EOF
 
-backend ssh_service
-    mode http
-    server ssh localhost:<SSH_PORT> check
-" > $haproxy_cfg
+# Restart HAProxy to apply changes
+sudo systemctl restart haproxy
 
-# Replace <WEBSITE_PORT> and <SSH_PORT> with actual port numbers
-sed -i 's/<WEBSITE_PORT>/80/' $haproxy_cfg
-sed -i 's/<SSH_PORT>/22/' $haproxy_cfg
-
-# Reload HAProxy to apply the changes
-echo "Reloading HAProxy..."
-systemctl reload haproxy
-
-# Set up cron job for certificate renewal
-(crontab -l 2>/dev/null; echo "0 2 * * * /usr/bin/certbot renew --quiet --post-hook 'systemctl reload haproxy'") | crontab -
-
-echo "SSL and HAProxy setup complete."
-
+echo "Configuration completed."
