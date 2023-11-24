@@ -1,10 +1,11 @@
 #!/bin/bash
 
+# Function to get the server IP address
+get_server_ip() {
+    SERVER_IP=$(curl -s ip.sb)
+}
+
 # Function to install Caddy
-
-SERVER_IP=$(curl -s ip.sb)
-
-
 install_caddy() {
     echo "Installing Caddy..."
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
@@ -38,7 +39,7 @@ http:// {
 $caddy_domain {
     handle /sub/* {
         root * /var/www/textfiles/
-        file_serverx
+        file_server
         uri strip_prefix /sub
     }
 
@@ -49,8 +50,6 @@ $caddy_domain {
     }
 }
 EOF
-
-    # Restart Caddy to apply changes
     systemctl restart caddy
 }
 
@@ -92,8 +91,6 @@ backend default_service_backend
     mode tcp
     server default_service 127.0.0.1:$default_service_port check
 EOF
-
-    # Restart HAProxy to apply changes
     systemctl restart haproxy
 }
 
@@ -101,30 +98,19 @@ EOF
 add_service_to_haproxy() {
     read -p "Enter the port for the new service (e.g., 5002): " service_port
     read -p "Enter the SNI domain to route to the new service (e.g., service.example.com): " service_sni
-
-    # Create a unique backend name using the SNI domain
     backend_name=$(echo "$service_sni" | tr '.' '_' | tr '-' '_')
-
-    # Add new service configuration to HAProxy
     echo "Adding new service ($backend_name) to HAProxy..."
     echo "
 backend $backend_name
     mode tcp
     server ${backend_name}_server 127.0.0.1:$service_port check" | sudo tee -a /etc/haproxy/haproxy.cfg
-
-    # Modify the frontend to add a rule for the new service
     sudo sed -i "/frontend https_in/a \    use_backend $backend_name if { req_ssl_sni -i $service_sni }" /etc/haproxy/haproxy.cfg
-
-    # Restart HAProxy to apply changes
     sudo systemctl restart haproxy
-
-    echo "New service added to HAProxy."
 }
 
+# Function to configure HAProxy for direct HTTP IP access
 configure_haproxy_http_ip_access() {
     read -p "Enter the port for direct HTTP IP access (e.g., 8080): " http_ip_access_port
-
-    # Add new frontend/backend configuration to HAProxy for HTTP
     echo "Adding direct HTTP IP access to HAProxy..."
     echo "
 frontend ip_http_based_frontend
@@ -135,43 +121,45 @@ frontend ip_http_based_frontend
 backend caddy_http_backend
     mode http
     server caddy 127.0.0.1:8083" | sudo tee -a /etc/haproxy/haproxy.cfg
-
-    # Restart HAProxy to apply changes
     sudo systemctl restart haproxy
-
-    echo "Direct HTTP IP access configured in HAProxy."
 }
 
-# Main script starts here
+# Main script logic
 echo "1. Install and configure Caddy and HAProxy from scratch."
 echo "2. Add a new service to an existing HAProxy setup."
 echo "3. Configure HAProxy for direct IP access."
 read -p "Choose an option (1, 2, or 3): " choice
 
-if [ "$choice" == "1" ]; then
-    read -p "Enter the domain to be served by Caddy: " caddy_domain
-    read -p "Enter the port for Caddy to listen on (e.g., 5003): " caddy_port
-    read -p "Enter the SNI domain for the default service (e.g., default.example.com): " default_sni_domain
-    read -p "Enter the port for the default service (e.g., 5004): " default_service_port
-
-    if ! command -v caddy &> /dev/null || ! command -v haproxy &> /dev/null; then
-        install_caddy
-        install_haproxy
-    fi
-    configure_caddy
-    configure_haproxy
-elif [ "$choice" == "2" ]; then
-    if ! command -v haproxy &> /dev/null; then
-        echo "HAProxy is not installed. Installing now."
-        install_haproxy
-    fi
-    elif [ "$choice" == "3" ]; then
-    if ! command -v haproxy &> /dev/null; then
-        echo "HAProxy is not installed. Installing now."
-        install_haproxy
-    fi
-    configure_haproxy_ip_access
-else
-    echo "Invalid choice. Exiting."
-    exit 1
-fi
+case $choice in
+    1)
+        read -p "Enter the domain to be served by Caddy: " caddy_domain
+        read -p "Enter the port for Caddy to listen on (e.g., 5003): " caddy_port
+        read -p "Enter the SNI domain for the default service (e.g., default.example.com): " default_sni_domain
+        read -p "Enter the port for the default service (e.g., 5004): " default_service_port
+        if ! command -v caddy &> /dev/null || ! command -v haproxy &> /dev/null; then
+            install_caddy
+            install_haproxy
+        fi
+        configure_caddy
+        configure_haproxy
+        ;;
+    2)
+        if ! command -v haproxy &> /dev/null; then
+            echo "HAProxy is not installed. Installing now."
+            install_haproxy
+        fi
+        add_service_to_haproxy
+        ;;
+    3)
+        get_server_ip
+        if ! command -v haproxy &> /dev/null; then
+            echo "HAProxy is not installed. Installing now."
+            install_haproxy
+        fi
+        configure_haproxy_http_ip_access
+        ;;
+    *)
+        echo "Invalid choice. Exiting."
+        exit 1
+        ;;
+esac
