@@ -26,6 +26,20 @@ configure_caddy() {
     https_port $caddy_port
 }
 
+:8083 {
+    handle /sub/* {
+        root * /var/www/textfiles/
+        file_server
+        uri strip_prefix /sub
+    }
+
+    handle /ssh/* {
+        root * /var/ssh-users/
+        file_server
+        uri strip_prefix /ssh
+    }
+}
+
 $caddy_domain {
     handle /sub/* {
         root * /var/www/textfiles/
