@@ -112,6 +112,30 @@ backend $backend_name
     echo "New service added to HAProxy."
 }
 
+configure_haproxy_ip_access() {
+    read -p "Enter the port for direct IP access (e.g., 8081): " direct_ip_port
+
+    SERVER_IP=$(curl -s ip.sb)
+
+    echo "Configuring HAProxy for direct IP access..."
+    cat <<EOF | sudo tee -a /etc/haproxy/haproxy.cfg
+
+frontend ip_based_frontend
+    bind $SERVER_IP:$direct_ip_port
+    mode http
+    default_backend ssh_backend
+
+backend ssh_backend
+    mode http
+    server caddy 127.0.0.1:5003
+EOF
+
+    # Restart HAProxy to apply changes
+    sudo systemctl restart haproxy
+
+    echo "Direct IP access configured in HAProxy."
+}
+
 # Main script starts here
 echo "1. Install and configure Caddy and HAProxy from scratch."
 echo "2. Add a new service to an existing HAProxy setup."
@@ -135,6 +159,8 @@ elif [ "$choice" == "2" ]; then
         install_haproxy
     fi
     add_service_to_haproxy
+    configure_haproxy_ip_access
+
 else
     echo "Invalid choice. Exiting."
     exit 1
